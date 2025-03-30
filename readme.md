@@ -35,6 +35,3 @@ To run this project:
 
 ## Credits
 Inspired by [The Coding Train's raycasting video](https://www.youtube.com/watch?v=TOEi6T2mtHo). A huge thanks to the channel for breaking down complex topics into easy-to-understand visuals.
-
----
-Feel free to expand or edit this README to fit your project's specific details or features!
