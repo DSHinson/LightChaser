@@ -3,7 +3,16 @@ import { Shape } from './Shape.js';
 const canvas = document.getElementById('raycastingCanvas');
 const ctx = canvas.getContext('2d');
 canvas.width = (window.innerWidth * 0.99);
-canvas.height = (window.innerHeight * 0.99);
+canvas.height = ((window.innerHeight * 0.99) / 2);
+
+const camCanvas = document.getElementById('cameraViewCanvas');
+const camCtx = camCanvas.getContext('2d');
+camCanvas.width = (window.innerWidth * 0.99);
+camCanvas.height = ((window.innerHeight * 0.99) / 2);
+
+let rotationSpeed = 5;
+let cameraAngle = 0;
+let fov = 90;
 //Timer for frames
 let lastTime = 0;
 // Circle properties
@@ -159,6 +168,7 @@ let keys = {};
 
 // Event listeners for key presses
 document.addEventListener('keydown', (e) => {
+  console.log(e.key);
   keys[e.key] = true;
 });
 
@@ -174,8 +184,12 @@ function updateCirclePosition() {
   if (keys['ArrowDown']) newCircle.y += newCircle.speed;
   if (keys['ArrowLeft']) newCircle.x -= newCircle.speed;
   if (keys['ArrowRight']) newCircle.x += newCircle.speed;
+  if (keys['q']) cameraAngle -= rotationSpeed;
+  if (keys['e']) cameraAngle += rotationSpeed;
+
+  cameraAngle = (cameraAngle + 360) % 360;
+
   newCircle.rays = calcRays(newCircle);
-  console.log(newCircle.rays)
   const intersects = newCircle.rays.some((ray) => ray.rayLength === 1);
   if (intersects) {
     return;
@@ -195,15 +209,22 @@ function drawCircle() {
   ctx.arc(circle.x, circle.y, circle.radius, 0, Math.PI * 2);
   ctx.fill();
 
-// Draw the circle's rays
-circle.rays.forEach((ray) => {
-  ctx.strokeStyle = 'rgba(255, 255, 0, 0.5)'; // Set yellow color with 50% opacity
-  ctx.lineWidth = 1; // Adjust line width if necessary
-  ctx.beginPath();
-  ctx.moveTo(ray.startPoint.x, ray.startPoint.y); // Start at the ray's start point
-  ctx.lineTo(ray.endPoint.x, ray.endPoint.y); // Draw line to the ray's endpoint
-  ctx.stroke(); // Render the line
-});
+  // Draw the circle's rays
+  circle.rays.forEach((ray) => {
+    if (ray.rayInFov) {
+      ctx.strokeStyle = 'rgba(255, 255, 0, 0.5)'; // Set yellow color with 50% opacity
+    }
+    else {
+      ctx.strokeStyle = 'rgba(117, 117, 111, 0.5)';
+    }
+
+
+    ctx.lineWidth = 1; // Adjust line width if necessary
+    ctx.beginPath();
+    ctx.moveTo(ray.startPoint.x, ray.startPoint.y); // Start at the ray's start point
+    ctx.lineTo(ray.endPoint.x, ray.endPoint.y); // Draw line to the ray's endpoint
+    ctx.stroke(); // Render the line
+  });
 
 }
 
@@ -224,30 +245,45 @@ function calcRays(calcCircle) {
       dx: dx / magnitude,
       dy: dy / magnitude
     }
-    const startPoint = {...point};
-     // 4. Define ray length (based on canvas or collision detection logic)
-     let rayLength  = calculateRayLength(direction,point);
-     // 5. Calculate endPoint using ray length
-     const endPoint = {
-       x: startPoint.x + direction.dx * rayLength,
-       y: startPoint.y + direction.dy * rayLength
-     };
+    const startPoint = { ...point };
+    // 4. Define ray length (based on canvas or collision detection logic)
+    let AndIntersectColour = calculateRayLengthAndIntersectColour(direction, point);
+    let rayLength = AndIntersectColour.rayLength;
+    let intersectColour = AndIntersectColour.intersectColour;
+    let rayInFov = false
+
+    //check if current degree is in fov
+    let fovHalf = fov / 2;
+    let diff = Math.abs(point.degree - cameraAngle);
+    diff = diff > 180 ? 360 - diff : diff;
+    if (diff <= fovHalf) {
+      rayInFov = true;
+    }
+
+    // 5. Calculate endPoint using ray length
+    const endPoint = {
+      x: startPoint.x + direction.dx * rayLength,
+      y: startPoint.y + direction.dy * rayLength
+    };
 
     return {
       startPoint: startPoint,
       direction,
       endPoint: endPoint,
-      rayLength
+      rayLength,
+      degree: point.degree,
+      rayInFov,
+      intersectColour
     }
 
   })
   return rays
 }
 
-function calculateRayLength(direction, currentPoint) {
+function calculateRayLengthAndIntersectColour(direction, currentPoint) {
   const segmentLength = 1; // Length of each segment
   let rayLength = 0; // Initialize ray length
-
+  let intersectColour = 'black';
 
   while (true) {
     // Move currentPoint outward by segmentLength
@@ -256,22 +292,20 @@ function calculateRayLength(direction, currentPoint) {
     rayLength += segmentLength;
 
     // Check if currentPoint is outside the canvas bounds
-    if (
-      currentPoint.x < 0 || currentPoint.x > canvas.width ||
-      currentPoint.y < 0 || currentPoint.y > canvas.height
-    ) {
+    if ( currentPoint.x < 0 || currentPoint.x > canvas.width || currentPoint.y < 0 || currentPoint.y > canvas.height) {
       break; // Stop if the ray exits the canvas
     }
 
     // Check if currentPoint intersects any shape
     for (let shape of shapes) {
       if (shape.isPointInsideShape(currentPoint)) {
-        return rayLength; // Stop and return length if intersection occurs
+        intersectColour = shape.color;
+        return {rayLength , intersectColour};// Stop and return length if intersection occurs
       }
     }
   }
 
-  return rayLength; // Return the full ray length if no intersections
+  return {rayLength , intersectColour}; // Return the full ray length if no intersections
 }
 
 
@@ -281,10 +315,56 @@ function generateCirclePoints(circle) {
     const radian = (degree * Math.PI) / 180;
     const x = circle.x + circle.radius * Math.cos(radian);
     const y = circle.y + circle.radius * Math.sin(radian);
-    points.push({ x, y });
+    points.push({ x, y, degree });
   }
   return points;
 }
+
+function renderCameraViewFPV() {
+  camCtx.clearRect(0, 0, camCanvas.width, camCanvas.height);
+  camCtx.fillStyle = 'black';
+  camCtx.fillRect(0, 0, camCanvas.width, camCanvas.height);
+
+  const fovDegrees = 90;
+  const halfFov = fovDegrees / 2;
+
+  const fovRays = circle.rays
+    .map(ray => {
+      let angleDiff = ray.degree - cameraAngle;
+      if (angleDiff > 180) angleDiff -= 360;
+      if (angleDiff < -180) angleDiff += 360;
+      return { ray, angleDiff };
+    })
+    .filter(obj => Math.abs(obj.angleDiff) <= halfFov)
+    .sort((a, b) => a.angleDiff - b.angleDiff); // sort left to right
+
+  const numRays = fovRays.length;
+  if (numRays === 0) return;
+
+  const screenWidth = camCanvas.width;
+  const screenHeight = camCanvas.height;
+  const columnWidth = screenWidth / numRays;
+
+  for (let i = 0; i < numRays; i++) {
+    const { ray, angleDiff } = fovRays[i];
+
+    const dx = ray.endPoint.x - ray.startPoint.x;
+    const dy = ray.endPoint.y - ray.startPoint.y;
+    let distance = Math.sqrt(dx * dx + dy * dy);
+    distance = Math.max(1, distance);
+
+    // Fix fisheye distortion
+    distance *= Math.cos(angleDiff * (Math.PI / 180));
+
+    // Wall height simulation
+    const wallHeight = Math.min(screenHeight, 3000 / distance);
+
+    camCtx.fillStyle = ray.intersectColour;
+    camCtx.fillRect(i * columnWidth, (screenHeight - wallHeight) / 2, columnWidth, wallHeight);
+  }
+}
+
+
 
 
 function drawScene(currentTime) {
@@ -297,7 +377,7 @@ function drawScene(currentTime) {
     ctx.fillStyle = 'black';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     drawCircle();
-
+    renderCameraViewFPV();
     //draw shapes
     shapes.forEach(shape => {
       shape.draw(ctx);
